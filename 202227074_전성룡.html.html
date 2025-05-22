@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  canvas {
+    border: 1px solid #000;
+  }
+  #inspectorbg {
+    position: absolute;
+    left: 850px;
+    top: 8px;
+    width: 200px;
+    height: 600px;
+    background-color: yellow;
+    border: 1px solid black;
+  }
+  #undo
+  {
+    position: absolute;
+    left: 20px;
+    top: 300px;
+  }
+  #drowheart
+  {
+    position: absolute;
+    left: 90px;
+    top: 300px;
+  }
+  p
+  {
+    padding: 0;
+    margin: 0;
+    font-size: 15px;
+  }
+</style>
+</head>
+<body>
+<canvas id="myCanvas" width="800" height="600"></canvas>
+<div id="inspectorbg">
+  <p>Position X</p>
+  <input type="text" id="posx">
+  <p>Position Y</p>
+  <input type="text" id="posy">
+  <p>Rotation</p>
+  <input type="text" id="rot">
+  <p>Scale X</p>
+  <input type="text" id="width">
+  <p>Scale Y</p>
+  <input type="text" id="height">
+  <button id="undo">Undo</button>
+  <button id="drowheart">DrowHeart</button>
+</div>
+<script>
+var canvas = document.getElementById("myCanvas");
+var ctx = canvas.getContext("2d");
+
+var rect = {
+  x: canvas.width / 2 - 50,
+  y: canvas.height / 2 - 50,
+  width: 100,
+  height: 100,
+  anglenum: 0,
+  isDragging: false,
+  resizeHandleRadius: 5,
+  rotationHandleRadius: 10,
+  isRotating: false,
+  rotationAngle: 0
+};
+
+var heart = {
+  x: rect.x + rect.width / 2,
+  y: rect.y + rect.height / 2,
+  heartWidth: Math.min(rect.width, rect.height) / 32,
+  heartHeight: Math.min(rect.width, rect.height) / 32,
+  rotationAngle: 0
+};
+
+var prevRotationAngle = 0;
+
+var rotationHandle = {
+  x: rect.x + rect.width / 2,
+  y: rect.y - 50 / 2,
+  rotationAngle: 0
+};
+
+var undoStack = [];
+
+function pushToUndoStack() {
+  undoStack.push({
+    x: rect.x,
+    y: rect.y,
+    width: rect.width,
+    height: rect.height,
+    rotationAngle: rect.rotationAngle
+  });
+}
+
+function updateInspectorValues() {
+  document.getElementById("posx").value = rect.x - 350;
+  document.getElementById("posy").value = (rect.y - 250) * -1;
+  document.getElementById("rot").value = (rect.rotationAngle * 180 / Math.PI + rect.anglenum);
+  document.getElementById("width").value = rect.width;
+  document.getElementById("height").value = rect.height;
+}
+
+function updateRectValues() {
+  const posXValue = parseInt(document.getElementById("posx").value);
+  const posYValue = parseInt(document.getElementById("posy").value);
+  const rotValue = parseFloat(document.getElementById("rot").value);
+  const widthValue = parseInt(document.getElementById("width").value);
+  const heightValue = parseInt(document.getElementById("height").value);
+
+  pushToUndoStack();
+
+  rect.x = isNaN(posXValue) ? 0 + 350 : (posXValue + 350);
+  rect.y = isNaN(posYValue) ? 0 + 250 : (~posYValue + 251);
+  rect.rotationAngle = isNaN(rotValue) ? 0 : (rotValue * (Math.PI / 180));
+  rect.width = isNaN(widthValue) ? 0 : widthValue;
+  rect.height = isNaN(heightValue) ? 0 : heightValue;
+
+  rotationHandle.x = rect.x + rect.width / 2;
+  rotationHandle.y = rect.y - 50 / 2;
+
+  heart.x = rect.x + rect.width / 2;
+  heart.y = rect.y + rect.height / 2;
+  heart.heartWidth = rect.width / 32;
+  heart.heartHeight = rect.height / 32;
+
+  updateRotateHandlePosition();
+  draw();
+}
+
+updateInspectorValues();
+
+document.getElementById("posx").addEventListener("input", updateRectValues);
+document.getElementById("posy").addEventListener("input", updateRectValues);
+document.getElementById("rot").addEventListener("input", updateRectValues);
+document.getElementById("width").addEventListener("input", updateRectValues);
+document.getElementById("height").addEventListener("input", updateRectValues);
+
+canvas.addEventListener("mousedown", function(event) {
+  var mouseX = event.clientX - canvas.getBoundingClientRect().left;
+  var mouseY = event.clientY - canvas.getBoundingClientRect().top;
+
+  rect.isDragging = false;
+  rect.isRotating = false;
+  rect.clickedResizeHandle = "";
+
+  if (
+    (mouseX >= rect.x && mouseX <= rect.x + rect.width) &&
+    (mouseY >= rect.y && mouseY <= rect.y + rect.height)
+  ) {
+    rect.isDragging = true;
+    rect.dragOffsetX = mouseX - rect.x;
+    rect.dragOffsetY = mouseY - rect.y;
+  } 
+  else if (
+    (mouseX >= rotationHandle.x - rect.rotationHandleRadius && mouseX <= rotationHandle.x + rect.rotationHandleRadius) &&
+    (mouseY >= rotationHandle.y - rect.rotationHandleRadius && mouseY <= rotationHandle.y + rect.rotationHandleRadius)
+  ) {
+    rect.isRotating = true;
+  }
+  updateInspectorValues();
+
+  if (mouseX >= rect.x && mouseX <= rect.x + rect.width &&
+      mouseY >= rect.y && mouseY <= rect.y + rect.height) {
+    rect.isDragging = true;
+    rect.dragOffsetX = mouseX - rect.x;
+    rect.dragOffsetY = mouseY - rect.y;
+  }
+  heart.rotationAngle = rect.rotationAngle;
+});
+
+canvas.addEventListener("mousemove", function(event) {
+  var mouseX = event.clientX - canvas.getBoundingClientRect().left;
+  var mouseY = event.clientY - canvas.getBoundingClientRect().top;
+  if (rect.isRotating) {
+    var centerX = rect.x + rect.width / 2;
+    var centerY = rect.y + rect.height / 2;
+    var angle = Math.atan2(mouseY - centerY, mouseX - centerX) - 30;
+    rect.rotationAngle = angle;
+    heart.rotationAngle = angle;
+    updateInspectorValues();
+    updateRotateHandlePosition();
+    draw();
+  }
+  if (rect.isDragging) {
+    if (rect.clickedResizeHandle === "topLeft") {
+      rect.width = rect.x + rect.width - mouseX;
+      rect.height = rect.y + rect.height - mouseY;
+      rect.x = mouseX;
+      rect.y = mouseY;
+    } 
+    else if (rect.clickedResizeHandle === "bottomRight") {
+      rect.width = mouseX - rect.x;
+      rect.height = mouseY - rect.y;
+    }
+    else if (rect.clickedResizeHandle === "topRight") {
+      rect.width = mouseX - rect.x;
+      rect.height = rect.y + rect.height - mouseY;
+      rect.y = mouseY;
+    }
+    else {
+      rect.x = mouseX - rect.dragOffsetX;
+      rect.y = mouseY - rect.dragOffsetY;
+    }
+    
+    rotationHandle.x = rect.x + rect.width / 2;
+    rotationHandle.y = rect.y - 50 / 2;
+
+    heart.x = rect.x + rect.width / 2;
+    heart.y = rect.y + rect.height / 2;
+    heart.heartWidth = rect.width / 32;
+    heart.heartHeight = rect.height / 32;
+
+    updateInspectorValues();
+    updateRotateHandlePosition();
+    draw();
+  }
+});
+
+canvas.addEventListener("mouseup", function() {
+  if (!rect.isDragging) {
+    prevRotationAngle = rect.rotationAngle;
+  }
+  rect.isDragging = false;
+  rect.isRotating = false;
+  rect.clickedResizeHandle = "";
+  updateRectValues();
+  rect.rotationAngle = prevRotationAngle;
+  updateInspectorValues();
+  updateRotateHandlePosition();
+  draw();
+});
+
+function updateRotateHandlePosition() {
+  var initialHandleX = rect.x + rect.width / 2;
+  var initialHandleY = rect.y - 50 / 2;
+  var centerX = rect.x + rect.width / 2;
+  var centerY = rect.y + rect.height / 2;
+  var rotatedHandleX = centerX + (initialHandleX - centerX) * Math.cos(rect.rotationAngle) - (initialHandleY - centerY) * Math.sin(rect.rotationAngle);
+  var rotatedHandleY = centerY + (initialHandleX - centerX) * Math.sin(rect.rotationAngle) + (initialHandleY - centerY) * Math.cos(rect.rotationAngle);
+  rotationHandle.x = rotatedHandleX;
+  rotationHandle.y = rotatedHandleY;
+
+  toplefthandle = resizePoint(rect.x, rect.y, toplefthandle.x, toplefthandle.y, centerX, centerY, rect.rotationAngle);
+  toprighthandle = resizePoint(rect.x + rect.width, rect.y, toprighthandle.x, toprighthandle.y, centerX, centerY, rect.rotationAngle);
+  bottomlefthandle = resizePoint(rect.x, rect.y + rect.height, bottomlefthandle.x, bottomlefthandle.y, centerX, centerY, rect.rotationAngle);
+  bottomrighthandle = resizePoint(rect.x + rect.width, rect.y + rect.height, bottomrighthandle.x, bottomrighthandle.y, centerX, centerY, rect.rotationAngle);
+}
+
+function resizePoint(ix, iy, x, y, centerX, centerY, angle) {
+  var initialHandleX = ix;
+  var initialHandleY = iy;
+  var newX = centerX + (initialHandleX - centerX) * Math.cos(angle) - (initialHandleY - centerY) * Math.sin(angle);
+  var newY = centerY + (initialHandleX - centerX) * Math.sin(angle) + (initialHandleY - centerY) * Math.cos(angle);
+  return { x: newX, y: newY };
+}
+
+var toplefthandle = {
+  x: rect.x,
+  y: rect.y
+};
+var toprighthandle = {
+  x: rect.x + rect.width,
+  y: rect.y
+};
+var bottomlefthandle = {
+  x: rect.x,
+  y: rect.y + rect.height
+};
+var bottomrighthandle = {
+  x: rect.x + rect.width,
+  y: rect.y + rect.height
+};
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  ctx.save();
+  ctx.translate(rect.x + rect.width / 2, rect.y + rect.height / 2);
+  ctx.rotate(rect.rotationAngle);
+  ctx.translate(-rect.x - rect.width / 2, -rect.y - rect.height / 2);
+
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+
+  ctx.restore();
+
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.arc(toplefthandle.x, toplefthandle.y, rect.resizeHandleRadius, 0, 2 * Math.PI);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(bottomlefthandle.x, bottomlefthandle.y, rect.resizeHandleRadius, 0, 2 * Math.PI);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(bottomrighthandle.x, bottomrighthandle.y, rect.resizeHandleRadius, 0, 2 * Math.PI);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(toprighthandle.x, toprighthandle.y, rect.resizeHandleRadius, 0, 2 * Math.PI);
+  ctx.fill();
+
+  ctx.fillStyle = "green";
+  ctx.beginPath();
+  ctx.arc(rotationHandle.x, rotationHandle.y, rect.rotationHandleRadius, 0, 2 * Math.PI);
+  ctx.fill();
+
+  ctx.fillStyle = "red";
+  ctx.save();
+  ctx.translate(heart.x, heart.y);
+  ctx.rotate(rect.rotationAngle);
+  ctx.translate(-heart.x, -heart.y);
+  ctx.beginPath();
+  for (var angle = 0; angle <= 2 * Math.PI; angle += 0.01) {
+    var x = heart.x + heart.heartWidth * (16 * Math.pow(Math.sin(angle), 3));
+    var y = heart.y - heart.heartHeight * (13 * Math.cos(angle) - 5 * Math.cos(2 * angle) - 2 * Math.cos(3 * angle) - Math.cos(4 * angle));
+    ctx.lineTo(x, y);
+  }
+  ctx.fill();
+  ctx.restore();
+}
+
+document.getElementById("undo").addEventListener("click", function() {
+  if (undoStack.length > 0) {
+    var prevState = undoStack.pop();
+    rect.x = prevState.x;
+    rect.y = prevState.y;
+    rect.width = prevState.width;
+    rect.height = prevState.height;
+    rect.rotationAngle = prevState.rotationAngle;
+    updateInspectorValues();
+    updateRotateHandlePosition();
+    draw();
+  }
+});
+
+document.getElementById("drowheart").addEventListener("click", function() {
+  draw();
+});
+</script>
+</body>
+</html>
